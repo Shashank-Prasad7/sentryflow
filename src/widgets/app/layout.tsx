@@ -2,6 +2,7 @@
 
 import { WidgetLayout } from '@nitrostack/widgets';
 import 'mapbox-gl/dist/mapbox-gl.css';
+import './globals.css';
 
 export default function RootLayout({
     children,
@@ -10,7 +11,7 @@ export default function RootLayout({
 }) {
     return (
         <html lang="en">
-            <body style={{ margin: 0, padding: 0, fontFamily: 'system-ui, sans-serif' }}>
+            <body style={{ margin: 0, padding: 0 }}>
                 <WidgetLayout>{children}</WidgetLayout>
             </body>
         </html>
