@@ -15,10 +15,17 @@ interface FraudSignal {
 }
 
 interface WidgetData {
-  orderId: string;
-  claimValueINR: number;
-  score: number;
-  signals: FraudSignal[];
+  orderId?: string;
+  claimValueINR?: number;
+  score?: number;
+  fraudScore?: number;
+  investigationResult?: {
+    orderId: string;
+    claimValueINR: number;
+    fraudScore: number;
+    recipientEmail?: string;
+  };
+  signals?: FraudSignal[];
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -310,11 +317,27 @@ export default function SentryAmazonWidget() {
   const [auditOpen, setAuditOpen] = useState(false);
   const [activeAction, setActiveAction] = useState<string | null>(null);
 
+  const safeData = {
+    orderId: data?.orderId ?? data?.investigationResult?.orderId ?? '',
+    claimValueINR: data?.claimValueINR ?? data?.investigationResult?.claimValueINR ?? 0,
+    score: data?.score ?? data?.fraudScore ?? data?.investigationResult?.fraudScore ?? 0,
+    signals: data?.signals ?? [],
+    recipientEmail: data?.investigationResult?.recipientEmail ?? 'judge@example.com',
+  };
+
   // Derived audit log from signals (simulated from data)
-  const auditEntries = data ? [
-    { timestamp: new Date(Date.now() - 120000).toISOString(), action: 'audit', result: `Fraud score: ${data.score}%, ${data.signals.filter(s => s.triggered).length} signals triggered` },
-    { timestamp: new Date(Date.now() - 60000).toISOString(), action: 'guard_block', result: `Auto-dispatch blocked — claim ₹${data.claimValueINR.toLocaleString('en-IN')} requires human review` },
-  ] : [];
+  const auditEntries = [
+    {
+      timestamp: new Date(Date.now() - 120000).toISOString(),
+      action: 'audit',
+      result: `Fraud score: ${safeData.score}%, ${safeData.signals.filter(s => s.triggered).length} signals triggered`,
+    },
+    {
+      timestamp: new Date(Date.now() - 60000).toISOString(),
+      action: 'guard_block',
+      result: `Auto-dispatch blocked — claim ₹${safeData.claimValueINR.toLocaleString('en-IN')} requires human review`,
+    },
+  ];
 
   const handleAction = async (type: 'approve' | 'escalate' | 'reject') => {
     if (!data || actionState === 'loading') return;
@@ -323,11 +346,13 @@ export default function SentryAmazonWidget() {
 
     try {
       if (type === 'approve') {
-        await callTool('dispatch_safet_claim_email', {
-          orderId: data.orderId,
-          claimValueINR: data.claimValueINR,
-          fraudScore: data.score,
-          recipientEmail: 'judge@example.com',
+        await callTool('dispatch_safet_claim', {
+          investigationResult: {
+            orderId: safeData.orderId,
+            claimValueINR: safeData.claimValueINR,
+            fraudScore: safeData.score,
+            recipientEmail: safeData.recipientEmail,
+          },
         });
         setActionState('approved');
       } else if (type === 'escalate') {
@@ -343,10 +368,10 @@ export default function SentryAmazonWidget() {
   };
 
   if (!isReady) return <LoadingState />;
-  if (!data || !data.orderId) return <EmptyState />;
+  if (!safeData.orderId) return <EmptyState />;
 
-  const colors = getScoreColor(data.score);
-  const rec = getRecommendation(data.score, data.signals);
+  const colors = getScoreColor(safeData.score);
+  const rec = getRecommendation(safeData.score, safeData.signals);
 
   const containerStyle: React.CSSProperties = {
     maxHeight: maxHeight ? `${maxHeight}px` : '900px',
@@ -369,7 +394,7 @@ export default function SentryAmazonWidget() {
             </div>
           </div>
           <div className={`px-3 py-1 rounded-full text-[11px] font-bold tracking-wider ${colors.bg} ${colors.text} border ${
-            data.score >= 80 ? 'border-red-500/20' : data.score >= 50 ? 'border-amber-500/20' : 'border-emerald-500/20'
+            safeData.score >= 80 ? 'border-red-500/20' : safeData.score >= 50 ? 'border-amber-500/20' : 'border-emerald-500/20'
           }`}>
             {colors.badge}
           </div>
@@ -383,10 +408,10 @@ export default function SentryAmazonWidget() {
           <h2 className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-3">Incident Details</h2>
           <div className="grid grid-cols-2 gap-3">
             {[
-              { label: 'Order ID', value: data.orderId, mono: true },
-              { label: 'Claim Amount', value: formatINR(data.claimValueINR), highlight: true },
+              { label: 'Order ID', value: safeData.orderId, mono: true },
+              { label: 'Claim Amount', value: formatINR(safeData.claimValueINR), highlight: true },
               { label: 'Marketplace', value: 'Amazon India', icon: '🇮🇳' },
-              { label: 'Signals', value: `${data.signals.filter(s => s.triggered && s.weight > 0).length} / ${data.signals.filter(s => s.weight > 0).length} triggered` },
+              { label: 'Signals', value: `${safeData.signals.filter(s => s.triggered && s.weight > 0).length} / ${safeData.signals.filter(s => s.weight > 0).length} triggered` },
             ].map((row, i) => (
               <div key={i} className="space-y-0.5">
                 <p className="text-[10px] text-slate-500 font-medium uppercase tracking-wide">{row.label}</p>
@@ -404,7 +429,7 @@ export default function SentryAmazonWidget() {
         {/* ── Score + Recommendation ────────────────────────────────── */}
         <div className="bg-[#10131a] border border-slate-800 rounded-xl p-4 animate-fade-in animate-delay-100 shadow-card">
           <div className="flex items-center gap-5">
-            <ScoreRing score={data.score} />
+            <ScoreRing score={safeData.score} />
             <div className="flex-1 min-w-0">
               <p className="text-[11px] text-slate-500 uppercase tracking-wider font-bold mb-1">AI Recommendation</p>
               <h3 className={`text-base font-bold ${colors.text} leading-tight`}>{rec.title}</h3>
@@ -425,11 +450,11 @@ export default function SentryAmazonWidget() {
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Fraud Signals</h2>
             <span className="text-[10px] text-slate-600 font-mono">
-              {data.signals.filter(s => s.triggered && s.weight > 0).length}/{data.signals.filter(s => s.weight > 0).length} active
+              {safeData.signals.filter(s => s.triggered && s.weight > 0).length}/{safeData.signals.filter(s => s.weight > 0).length} active
             </span>
           </div>
           <div className="space-y-2">
-            {data.signals.map((sig, i) => (
+            {safeData.signals.map((sig, i) => (
               <SignalRow key={sig.name} signal={sig} index={i} />
             ))}
           </div>
@@ -438,7 +463,7 @@ export default function SentryAmazonWidget() {
         {/* ── Timeline ──────────────────────────────────────────────── */}
         <div className="bg-[#10131a] border border-slate-800 rounded-xl p-4 animate-fade-in animate-delay-300 shadow-card">
           <h2 className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-4">Investigation Timeline</h2>
-          <Timeline score={data.score} />
+          <Timeline score={safeData.score} />
         </div>
 
         {/* ── Action Buttons ────────────────────────────────────────── */}
@@ -509,7 +534,7 @@ export default function SentryAmazonWidget() {
                    actionState === 'rejected' ? 'Claim Rejected' : 'Action Failed — Try Again'}
                 </p>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  {actionState === 'approved' ? `Safe-T Claim email sent for order ${data.orderId}` :
+                  {actionState === 'approved' ? `Safe-T Claim email sent for order ${safeData.orderId}` :
                    actionState === 'escalated' ? 'Forwarded to fraud investigation team' :
                    actionState === 'rejected' ? 'Return claim has been denied' : 'An error occurred during dispatch'}
                 </p>

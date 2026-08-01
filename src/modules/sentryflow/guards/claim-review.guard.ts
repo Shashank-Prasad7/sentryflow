@@ -24,11 +24,11 @@ export class ClaimReviewGuard {
       claimValueINR: number;
       fraudScore: number;
     },
-    ctx: ExecutionContext,
+    ctx?: ExecutionContext,
   ): boolean {
     // Block if claim exceeds auto-dispatch threshold
     if (input.claimValueINR > 20000) {
-      ctx.logger.info('Guard blocked: claim exceeds auto-dispatch threshold', {
+      ctx?.logger?.info('Guard blocked: claim exceeds auto-dispatch threshold', {
         claimValueINR: input.claimValueINR,
         threshold: 20000,
       });
@@ -39,7 +39,7 @@ export class ClaimReviewGuard {
     // This is the confidence-gated autonomy differentiator:
     // even low-value claims with borderline fraud signals get held for review
     if (input.fraudScore >= 50 && input.fraudScore < 80) {
-      ctx.logger.info('Guard blocked: fraud score in ambiguous confidence band', {
+      ctx?.logger?.info('Guard blocked: fraud score in ambiguous confidence band', {
         fraudScore: input.fraudScore,
         band: '50-80',
       });
@@ -47,7 +47,7 @@ export class ClaimReviewGuard {
     }
 
     // Allow auto-dispatch for low-value, high-confidence cases
-    ctx.logger.info('Guard allowed: claim passed all thresholds', {
+    ctx?.logger?.info('Guard allowed: claim passed all thresholds', {
       claimValueINR: input.claimValueINR,
       fraudScore: input.fraudScore,
     });

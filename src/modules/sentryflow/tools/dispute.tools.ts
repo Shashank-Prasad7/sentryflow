@@ -25,6 +25,17 @@ const DispatchSafeTClaimEmailSchema = z.object({
   recipientEmail: z.string().email().describe('Email address for the Safe-T Claim'),
 });
 
+const DispatchSafeTClaimSchema = z.object({
+  investigationResult: z.object({
+    orderId: z.string().describe('Amazon order ID'),
+    claimValueINR: z.number().describe('Claim value in INR'),
+    fraudScore: z.number().describe('Computed fraud confidence score (0-100)'),
+    recipientEmail: z.string().email().optional().describe('Email address for the Safe-T Claim'),
+  }).describe('Fraud investigation result to turn into a Safe-T claim'),
+});
+
+const HealthCheckSchema = z.object({}).strict();
+
 // Widget metadata
 function sentryflowWidget(route: string) {
   return {
@@ -100,9 +111,9 @@ export class DisputeTools {
   })
   async auditAmazonIncident(
     input: z.infer<typeof AuditAmazonIncidentSchema>,
-    ctx: ExecutionContext,
+    ctx?: ExecutionContext,
   ) {
-    ctx.logger.info('Auditing Amazon incident', { orderId: input.orderId });
+    ctx?.logger?.info('Auditing Amazon incident', { orderId: input.orderId });
 
     // Fetch dispatch, return, and order metadata
     const dispatch = await this.amazon.getDispatchLog(input.orderId);
@@ -119,7 +130,7 @@ export class DisputeTools {
       result,
     });
 
-    ctx.logger.info('Audit complete', {
+    ctx?.logger?.info('Audit complete', {
       orderId: input.orderId,
       fraudScore: result.score,
       signalsTriggered: result.signals.filter(s => s.triggered).length,
@@ -167,18 +178,106 @@ export class DisputeTools {
   @Widget(sentryflowWidget('sentry-amazon-widget'))
   async dispatchSafeTClaimEmail(
     input: z.infer<typeof DispatchSafeTClaimEmailSchema>,
-    ctx: ExecutionContext,
+    ctx?: ExecutionContext,
   ) {
-    ctx.logger.info('Dispatching Safe-T Claim email', {
+    return this.dispatchSafeTClaimInternal(input, ctx);
+  }
+
+  /**
+   * Tool 3: dispatch_safet_claim
+   *
+   * Canonical tool for the hackathon flow. It accepts an investigation result and
+   * routes through the same approval guard and widget experience as the legacy
+   * email-specific tool, without changing the underlying business logic.
+   */
+  @Tool({
+    name: 'dispatch_safet_claim',
+    description: 'Turns a fraud investigation result into a Safe-T Claim workflow action while preserving the same guard and widget-based review experience.',
+    inputSchema: DispatchSafeTClaimSchema,
+    examples: {
+      request: {
+        investigationResult: {
+          orderId: '408-98213-1102',
+          claimValueINR: 45000,
+          fraudScore: 100,
+          recipientEmail: 'judge@example.com',
+        },
+      },
+      response: {
+        status: 'sent',
+        orderId: '408-98213-1102',
+        messageId: 'msg_1234567890',
+      },
+    },
+  })
+  @UseGuards(ClaimReviewGuard as any)
+  @Widget(sentryflowWidget('sentry-amazon-widget'))
+  async dispatchSafetClaim(
+    input: z.infer<typeof DispatchSafeTClaimSchema>,
+    ctx?: ExecutionContext,
+  ) {
+    return this.dispatchSafeTClaimInternal(
+      {
+        orderId: input.investigationResult.orderId,
+        claimValueINR: input.investigationResult.claimValueINR,
+        fraudScore: input.investigationResult.fraudScore,
+        recipientEmail: input.investigationResult.recipientEmail ?? 'judge@example.com',
+      },
+      ctx,
+    );
+  }
+
+  /**
+   * Tool 4: health_check
+   *
+   * Returns runtime status for the SentryFlow server and its key workflows.
+   */
+  @Tool({
+    name: 'health_check',
+    description: 'Returns the current health status of the SentryFlow MCP server and its key workflows.',
+    inputSchema: HealthCheckSchema,
+    examples: {
+      request: {},
+      response: {
+        status: 'ok',
+        service: 'sentryflow',
+        checks: {
+          audit: 'ready',
+          claimReview: 'ready',
+          widgets: 'ready',
+        },
+      },
+    },
+  })
+  async healthCheck(
+    _input: z.infer<typeof HealthCheckSchema>,
+    ctx?: ExecutionContext,
+  ) {
+    ctx?.logger?.info('Health check requested');
+
+    return {
+      status: 'ok',
+      service: 'sentryflow',
+      checks: {
+        audit: 'ready',
+        claimReview: 'ready',
+        widgets: 'ready',
+      },
+    };
+  }
+
+  private async dispatchSafeTClaimInternal(
+    input: z.infer<typeof DispatchSafeTClaimEmailSchema>,
+    ctx?: ExecutionContext,
+  ) {
+    ctx?.logger?.info('Dispatching Safe-T Claim email', {
       orderId: input.orderId,
       claimValueINR: input.claimValueINR,
       fraudScore: input.fraudScore,
     });
 
-    // Send email via Resend
     const emailResult = await this.email.sendSafeTClaim(input);
 
-    // Log to audit trail
     await this.auditLog.record({
       orderId: input.orderId,
       action: 'dispatch',
@@ -190,7 +289,7 @@ export class DisputeTools {
       },
     });
 
-    ctx.logger.info('Safe-T Claim email dispatched', {
+    ctx?.logger?.info('Safe-T Claim email dispatched', {
       orderId: input.orderId,
       messageId: emailResult.messageId,
     });
