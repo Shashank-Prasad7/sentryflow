@@ -188,7 +188,6 @@ The audit log automatically redacts buyer names, addresses, emails, and phone nu
 - [ ] Signal effectiveness metrics
 
 ## Files
-
 - **Demo guide**: `DEMO_GUIDE.md`
 - **Trigger script**: `scripts/trigger-incident.ts`
 - **Core module**: `src/modules/sentryflow/`
